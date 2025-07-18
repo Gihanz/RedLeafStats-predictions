@@ -3,7 +3,7 @@ name: Upload IRCC Forecast to Firestore
 on:
   workflow_dispatch:  # Allow manual trigger from GitHub UI
   schedule:
-    - cron: '0 13 * * 1'  # Runs every Monday 9AM EST (13:00 UTC)
+    - cron: '0 10 * * *'  # Runs every Monday 9AM EST (13:00 UTC)
 
 jobs:
   update-forecast:

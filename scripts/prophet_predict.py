@@ -1,5 +1,3 @@
-# scripts/prophet_predict.py
-
 import os
 import json
 import requests
@@ -9,36 +7,35 @@ from prophet import Prophet
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# --- Full Firebase credential dict from environment variables ---
-
+# --- Firebase Credentials from GitHub Secrets ---
 firebase_creds = {
     "type": "service_account",
     "project_id": os.environ["FIREBASE_PROJECT_ID"],
     "private_key": os.environ["FIREBASE_PRIVATE_KEY"].replace("\\n", "\n"),
     "client_email": os.environ["FIREBASE_CLIENT_EMAIL"],
-    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": os.environ["FIREBASE_CLIENT_CERT_URL"]
 }
 
 cred = credentials.Certificate(firebase_creds)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- Fetch IRCC data ---
+# --- Fetch IRCC draw data ---
 URL = "https://www.canada.ca/content/dam/ircc/documents/json/ee_rounds_123_en.json"
 response = requests.get(URL)
-data = response.json()["RoundsOfInvitation"]
+data = response.json()["rounds"]  # ✅ Fixed key
 
-# --- Prepare DataFrame ---
-df = pd.DataFrame([{
-    "ds": d["drawDate"],
-    "y": int(d["score"])
-} for d in data if d.get("score") and d.get("drawDate")])
-
+# --- Prepare DataFrame for Prophet ---
+df = pd.DataFrame([
+    {"ds": d["drawDate"], "y": int(d["drawCRS"])}
+    for d in data if d.get("drawCRS") and d.get("drawDate")
+])
 df["ds"] = pd.to_datetime(df["ds"])
 
-# --- Prophet Model ---
+# --- Prophet Forecasting ---
 model = Prophet()
 model.fit(df)
 
@@ -46,7 +43,7 @@ future_date = df["ds"].max() + pd.Timedelta(days=14)
 future = pd.DataFrame({"ds": [future_date]})
 forecast = model.predict(future).iloc[0]
 
-# --- Prediction data ---
+# --- Prediction Object ---
 prediction = {
     "predictedDrawDate": forecast["ds"].isoformat(),
     "crs_yhat": round(forecast["yhat"]),
@@ -59,5 +56,6 @@ prediction = {
     "modelUpdatedAt": datetime.utcnow().isoformat()
 }
 
+# --- Upload to Firestore ---
 db.collection("predictions").document("nextDraw").set(prediction)
 print("✅ Prediction uploaded to Firestore:", prediction)

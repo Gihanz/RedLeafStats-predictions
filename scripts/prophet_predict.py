@@ -1,60 +1,78 @@
-# scripts/prophet_predict.py
-
 import os
 import json
-import requests
-from datetime import datetime
 import pandas as pd
 from prophet import Prophet
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-# --- Full Firebase credential dict from environment variables ---
-
-firebase_creds = {
+# ✅ Setup Firebase Admin
+firebase_credentials = {
     "type": "service_account",
     "project_id": os.environ["FIREBASE_PROJECT_ID"],
-    "private_key": os.environ["FIREBASE_PRIVATE_KEY"].replace("\\n", "\n"),
+    "private_key_id": os.environ["FIREBASE_PRIVATE_KEY_ID"],
+    "private_key": os.environ["FIREBASE_PRIVATE_KEY"].replace('\\n', '\n'),
     "client_email": os.environ["FIREBASE_CLIENT_EMAIL"],
+    "client_id": os.environ["FIREBASE_CLIENT_ID"],
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": os.environ["FIREBASE_CLIENT_CERT_URL"]
 }
 
-cred = credentials.Certificate(firebase_creds)
+cred = credentials.Certificate(firebase_credentials)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# --- Fetch IRCC data ---
-URL = "https://www.canada.ca/content/dam/ircc/documents/json/ee_rounds_123_en.json"
-response = requests.get(URL)
-data = response.json().get("RoundsOfInvitation", [])
+# ✅ Fetch data from Firestore (e.g. ee_rounds)
+docs = db.collection("ee_rounds").order_by("drawDate").stream()
 
-# --- Prepare DataFrame ---
-df = pd.DataFrame([{
-    "ds": d["drawDate"],
-    "y": int(d["score"])
-} for d in data if d.get("score") and d.get("drawDate")])
+data = []
+for doc in docs:
+    d = doc.to_dict()
+    if "drawDate" in d and "drawCRS" in d:
+        data.append({
+            "drawDate": d["drawDate"],
+            "drawCRS": d["drawCRS"]
+        })
 
+# ✅ Ensure we have data
+if not data:
+    print("⚠️ No data returned from Firestore. Exiting.")
+    exit(1)
+
+df = pd.DataFrame(data)
+
+# ✅ Ensure correct columns exist
+expected_cols = {"drawDate", "drawCRS"}
+if not expected_cols.issubset(df.columns):
+    print(f"❌ Missing expected columns in Firestore data: {expected_cols - set(df.columns)}")
+    exit(1)
+
+# ✅ Rename for Prophet
+df = df.rename(columns={"drawDate": "ds", "drawCRS": "y"})
 df["ds"] = pd.to_datetime(df["ds"])
+df = df.sort_values("ds")
 
-# --- Prophet Model ---
+# ✅ Fit Prophet model
 model = Prophet()
 model.fit(df)
 
-future_date = df["ds"].max() + pd.Timedelta(days=14)
-future = pd.DataFrame({"ds": [future_date]})
-forecast = model.predict(future).iloc[0]
+# ✅ Create future dataframe (e.g., predict next 10 draws)
+future = model.make_future_dataframe(periods=10, freq='W')
+forecast = model.predict(future)
 
-# --- Prediction data ---
-prediction = {
-    "predictedDrawDate": forecast["ds"].isoformat(),
-    "crs_yhat": round(forecast["yhat"]),
-    "crs_yhat_upper": round(forecast["yhat_upper"]),
-    "crs_yhat_lower": round(forecast["yhat_lower"]),
-    "trend": round(forecast["trend"], 2),
-    "modelUpdatedAt": datetime.utcnow().isoformat()
-}
+# ✅ Display or upload the forecast
+print(forecast[["ds", "yhat", "yhat_lower", "yhat_upper"]].tail(10))
 
-db.collection("predictions").document("nextDraw").set(prediction)
-print("✅ Prediction uploaded to Firestore:", prediction)
+# ✅ Optional: upload predictions to Firestore
+for i, row in forecast.tail(10).iterrows():
+    doc = {
+        "predictedDate": row["ds"].strftime("%Y-%m-%d"),
+        "predictedCRS": int(row["yhat"]),
+        "lowerBound": int(row["yhat_lower"]),
+        "upperBound": int(row["yhat_upper"]),
+        "source": "prophet"
+    }
+    db.collection("ee_forecasts").add(doc)
+
+print("✅ Prophet forecast completed and uploaded.")

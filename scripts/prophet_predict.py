@@ -18,8 +18,7 @@ firebase_creds = {
     "client_email": os.environ["FIREBASE_CLIENT_EMAIL"],
     "auth_uri": "https://accounts.google.com/o/oauth2/auth",
     "token_uri": "https://oauth2.googleapis.com/token",
-    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    "client_x509_cert_url": os.environ["FIREBASE_CLIENT_CERT_URL"]
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs"
 }
 
 cred = credentials.Certificate(firebase_creds)

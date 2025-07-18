@@ -1,31 +1,33 @@
-name: Upload IRCC Forecast to Firestore
+# .github/workflows/forecast-upload.yml
+
+name: Upload CRS Forecast to Firestore
 
 on:
-  workflow_dispatch:  # Allow manual trigger from GitHub UI
+  workflow_dispatch:  # Manual run
   schedule:
-    - cron: '0 11 * * *'  # Runs every Monday 9AM EST (13:00 UTC)
+    - cron: "0 11 * * *"  # Every Monday 8 AM UTC
 
 jobs:
-  update-forecast:
+  upload-forecast:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: 3.10
+          python-version: "3.10"
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
-          pip install firebase-admin requests
+          python -m pip install --upgrade pip
+          pip install prophet firebase-admin pandas requests
 
-      - name: Run forecast script
+      - name: Run Prediction Script
         env:
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
-          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
           FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-        run: |
-          python scripts/forecast_to_firestore.py
+          FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+        run: python scripts/prophet_predict.py
